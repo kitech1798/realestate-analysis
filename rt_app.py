@@ -350,6 +350,46 @@ def compute_national_top10():
     return dong_view, apt_view
 
 
+@st.cache_data(ttl=3600, show_spinner='6억 이하 거래 집계 중...')
+def aggregate_under_threshold(sido: str, threshold_eok: int,
+                              sizes_key: tuple, period_days: int):
+    """선택 시/도 내 매매 거래 중 거래금액 ≤ threshold_eok(억) 인 거래만 집계.
+    반환: (단지 집계 DataFrame, 원본 거래 DataFrame).
+    sizes_key는 캐시 키용 정렬된 튜플 — 빈 튜플이면 평수 필터 없음."""
+    codes = load_codes()
+    sub = codes[codes['시도'] == sido]
+    cutoff = pd.Timestamp(datetime.now() - timedelta(days=period_days))
+    threshold_manwon = threshold_eok * 10000
+
+    rows = []
+    for _, r in sub.iterrows():
+        df = load_district(r['시군구코드'], '매매')
+        if df.empty:
+            continue
+        df = df[df['거래일'] >= cutoff]
+        df = df[df['거래금액'] <= threshold_manwon]
+        if sizes_key:
+            df = df[df['평수구간'].isin(sizes_key)]
+        if df.empty:
+            continue
+        df = df.assign(시군구=r['시군구'])
+        rows.append(df)
+
+    if not rows:
+        return pd.DataFrame(), pd.DataFrame()
+
+    all_df = pd.concat(rows, ignore_index=True)
+    apt_df = (all_df.groupby(['시군구', '동', '아파트'], observed=True)
+              .agg(평균=('거래금액', 'mean'),
+                   최저=('거래금액', 'min'),
+                   최고=('거래금액', 'max'),
+                   거래수=('거래금액', 'count'),
+                   최근거래일=('거래일', 'max'),
+                   대표평형=('공급평수', 'median'))
+              .reset_index())
+    return apt_df, all_df
+
+
 def render_top10(df: pd.DataFrame, name_col: str, leaf_label: str):
     """Top 10 리더보드 — 메달 뱃지 + 압축 행 HTML 렌더링."""
     if df.empty:
@@ -727,6 +767,119 @@ def render_compare(codes):
         st.info('위에서 아파트를 추가하면 비교 차트가 표시됩니다. 최대 6개.')
 
 
+# ───────────────────── 탭 3: 6억 이하 찾기 ─────────────────────
+def render_six_under(codes):
+    st.markdown(
+        f"<p style='color:{TEXT_MUTED};margin:-4px 0 14px;font-size:12.5px;'>"
+        f"선택 시/도 안에서 <b style='color:{TEXT};'>지정 금액 이하</b>로 거래된 매매 단지를 "
+        f"한 번에 모아 봅니다. 기본 6억은 슬라이더로 4억·5억·9억 등으로 조정 가능.</p>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('#### 필터')
+    f1, f2, f3, f4 = st.columns([1.2, 1.8, 1.3, 2])
+    sido = f1.selectbox('시/도', sorted(codes['시도'].unique()), key='u_sido')
+    sub = codes[codes['시도'] == sido]
+    sigungu_options = ['전체'] + sorted(sub['시군구'].tolist())
+    sigungu = f2.selectbox('시/군/구', sigungu_options, index=0, key='u_sgg')
+    threshold = f3.slider('가격 상한 (억)', 1, 15, 6, step=1, key='u_threshold')
+    period_label = f4.radio('기간',
+                            ['최근 6개월', '최근 1년', '최근 3년'],
+                            index=1, horizontal=True, key='u_period')
+
+    f5, _ = st.columns([3, 2])
+    sizes = f5.multiselect('평수 구간 (선택)', SIZE_LABELS,
+                           default=SIZE_LABELS, key='u_sizes')
+
+    period_days = {'최근 6개월': 180, '최근 1년': 365, '최근 3년': 365 * 3}[period_label]
+    sizes_key = tuple(sorted(sizes)) if sizes else tuple(SIZE_LABELS)
+
+    apt_df, raw_df = aggregate_under_threshold(sido, threshold, sizes_key, period_days)
+
+    if sigungu != '전체':
+        apt_df = apt_df[apt_df['시군구'] == sigungu]
+        raw_df = raw_df[raw_df['시군구'] == sigungu] if not raw_df.empty else raw_df
+
+    scope = sido + (f" · {sigungu}" if sigungu != '전체' else '')
+    st.subheader(f"{scope} · {threshold}억 이하 매매 거래")
+    st.caption(f"{period_label} · 기준일 {datetime.now().strftime('%Y-%m-%d')}")
+
+    if apt_df.empty or raw_df.empty:
+        st.warning(f'{scope} 내 {threshold}억 이하 거래가 없습니다. '
+                   f'상한·평수·기간을 완화해 보세요.')
+        return
+
+    # KPI 4종
+    h1, h2, h3, h4 = st.columns(4)
+    h1.metric(f'{threshold}억 이하 거래', f"{len(raw_df):,}건")
+    h2.metric('단지 수', f"{len(apt_df):,}개")
+    h3.metric('평균 거래가', f"{raw_df['거래금액'].mean()/10000:.2f}억")
+    h4.metric('최저 거래가', f"{raw_df['거래금액'].min()/10000:.2f}억")
+
+    # 시군구별 거래 건수 — 시군구='전체'일 때만 의미 있음
+    if sigungu == '전체':
+        st.markdown(f'### {sido} 시/군/구별 {threshold}억 이하 거래 건수')
+        sgg_count = (raw_df.groupby('시군구', observed=True)
+                     .size().reset_index(name='거래수')
+                     .sort_values('거래수', ascending=True))
+        fig_sgg = go.Figure(go.Bar(
+            x=sgg_count['거래수'], y=sgg_count['시군구'], orientation='h',
+            marker=dict(color=sgg_count['거래수'],
+                        colorscale=[[0, INDIGO], [0.5, VIOLET], [1, PINK]]),
+            text=sgg_count['거래수'].apply(lambda v: f'{v:,}'),
+            textposition='outside',
+            hovertemplate='%{y}<br>%{x:,}건<extra></extra>',
+        ))
+        fig_sgg.update_layout(xaxis_title='거래 건수', yaxis_title='')
+        st.plotly_chart(fig_layout(fig_sgg, max(360, 28 * len(sgg_count))),
+                        use_container_width=True)
+
+    # 면적-가격 산점도 — 6억(=threshold) 라인 표기
+    st.markdown('### 전용면적 vs 거래가 분포')
+    scatter_df = raw_df.copy()
+    scatter_df['금액_억'] = scatter_df['거래금액'] / 10000
+    fig_sc = px.scatter(
+        scatter_df, x='공급평수', y='금액_억', color='평수구간',
+        color_discrete_map=SIZE_COLORS,
+        hover_data=['시군구', '동', '아파트', '거래일', '층', '건축년도'],
+        labels={'금액_억': '거래금액 (억원)', '공급평수': '공급면적(평, 추정)'},
+        opacity=0.55,
+    )
+    fig_sc.update_traces(marker=dict(size=6, line=dict(width=0)))
+    fig_sc.add_hline(y=threshold, line_dash='dash', line_color=AMBER,
+                     annotation_text=f'{threshold}억',
+                     annotation_position='top right',
+                     annotation_font=dict(color=AMBER))
+    st.plotly_chart(fig_layout(fig_sc, 440), use_container_width=True)
+
+    # 단지 리더보드
+    st.markdown(f'### {threshold}억 이하 단지 리스트')
+    s1, s2 = st.columns([2.2, 5])
+    sort_label = s1.radio('정렬',
+                          ['평균가 낮은 순', '최저가 낮은 순',
+                           '거래수 많은 순', '최근거래 빠른 순'],
+                          horizontal=True, key='u_sort')
+    s2.caption(f"총 {len(apt_df):,}개 단지 — 상위 100개 표시. "
+               f"평균가는 단지 내 {threshold}억 이하 거래만 계산한 값.")
+
+    sort_map = {
+        '평균가 낮은 순': ('평균', True),
+        '최저가 낮은 순': ('최저', True),
+        '거래수 많은 순': ('거래수', False),
+        '최근거래 빠른 순': ('최근거래일', False),
+    }
+    col, asc = sort_map[sort_label]
+    view = apt_df.sort_values(col, ascending=asc).head(100).copy()
+    view['평균(억)'] = (view['평균'] / 10000).round(2)
+    view['최저(억)'] = (view['최저'] / 10000).round(2)
+    view['최고(억)'] = (view['최고'] / 10000).round(2)
+    view['대표평형'] = (view['대표평형'].round(0).astype(int).astype(str) + '평')
+    view['최근거래월'] = pd.to_datetime(view['최근거래일']).dt.strftime('%Y-%m')
+    cols = ['시군구', '동', '아파트', '평균(억)', '최저(억)', '최고(억)',
+            '거래수', '대표평형', '최근거래월']
+    st.dataframe(view[cols], hide_index=True, use_container_width=True)
+
+
 # ───────────────────── 메인 ─────────────────────
 def main():
     st.markdown(
@@ -762,11 +915,13 @@ def main():
 
     codes = load_codes()
 
-    tab1, tab2 = st.tabs(['📊 지역 분석', '🏘️ 아파트 비교'])
+    tab1, tab2, tab3 = st.tabs(['📊 지역 분석', '🏘️ 아파트 비교', '🔻 6억 이하 찾기'])
     with tab1:
         render_region(codes)
     with tab2:
         render_compare(codes)
+    with tab3:
+        render_six_under(codes)
 
     st.markdown(
         f"<p style='color:{TEXT_MUTED};font-size:11.5px;margin-top:24px;'>"
