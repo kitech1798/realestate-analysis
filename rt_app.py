@@ -235,6 +235,47 @@ code, pre {{ font-family: 'JetBrains Mono', ui-monospace, monospace; }}
 
 /* Top 10 expander 내부 패딩 살짝 줄이기 */
 .stExpander details > div:nth-child(2) {{ padding-top: 4px !important; }}
+
+/* ── Maker 배지 (우측 상단 각인) ───────────────────── */
+.maker-badge {{
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 7px 14px 7px 11px; border-radius: 999px;
+    background: linear-gradient({CARD}, {CARD}) padding-box,
+                linear-gradient(135deg, rgba(168,85,247,0.55), rgba(236,72,153,0.35) 50%, rgba(99,102,241,0.5)) border-box;
+    border: 1px solid transparent;
+    text-decoration: none !important;
+    box-shadow: 0 6px 18px -10px rgba(168,85,247,0.55),
+                inset 0 1px 0 rgba(255,255,255,0.05);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    white-space: nowrap;
+}}
+.maker-badge:hover {{
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px -10px rgba(168,85,247,0.75),
+                inset 0 1px 0 rgba(255,255,255,0.07);
+}}
+.maker-dot {{
+    width: 7px; height: 7px; border-radius: 50%;
+    background: linear-gradient(135deg, {VIOLET} 0%, {PINK} 100%);
+    box-shadow: 0 0 10px rgba(168,85,247,0.9), 0 0 2px rgba(236,72,153,0.8);
+    animation: maker-pulse 2.6s ease-in-out infinite;
+    flex-shrink: 0;
+}}
+@keyframes maker-pulse {{
+    0%, 100% {{ opacity: 1; transform: scale(1); }}
+    50%      {{ opacity: 0.45; transform: scale(0.78); }}
+}}
+.maker-label {{
+    font-size: 10px; color: {TEXT_DIM}; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    font-family: 'Inter', sans-serif;
+}}
+.maker-name {{
+    font-size: 12.5px; font-weight: 800; letter-spacing: -0.01em;
+    background: linear-gradient(135deg, #f5f5fa 0%, #d8b4fe 45%, #f9a8d4 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -690,16 +731,25 @@ def render_compare(codes):
 def main():
     st.markdown(
         f"""
-        <div style='display:flex;align-items:center;gap:14px;margin-bottom:4px;'>
-          <div style='width:38px;height:38px;border-radius:11px;
-                background:linear-gradient(135deg,{VIOLET} 0%, {PINK} 100%);
-                display:flex;align-items:center;justify-content:center;
-                box-shadow:0 8px 22px -8px rgba(168,85,247,0.6);
-                font-size:20px;'>🏠</div>
-          <h1 style='margin:0;font-size:30px;font-weight:800;letter-spacing:-0.03em;
-                background:linear-gradient(135deg,#f5f5fa 0%, #c4b5fd 60%, #ec4899 100%);
-                -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-                background-clip:text;'>부동산 실거래가 분석</h1>
+        <div style='display:flex;align-items:center;justify-content:space-between;
+              gap:16px;margin-bottom:4px;flex-wrap:wrap;'>
+          <div style='display:flex;align-items:center;gap:14px;'>
+            <div style='width:38px;height:38px;border-radius:11px;
+                  background:linear-gradient(135deg,{VIOLET} 0%, {PINK} 100%);
+                  display:flex;align-items:center;justify-content:center;
+                  box-shadow:0 8px 22px -8px rgba(168,85,247,0.6);
+                  font-size:20px;'>🏠</div>
+            <h1 style='margin:0;font-size:30px;font-weight:800;letter-spacing:-0.03em;
+                  background:linear-gradient(135deg,#f5f5fa 0%, #c4b5fd 60%, #ec4899 100%);
+                  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                  background-clip:text;'>부동산 실거래가 분석</h1>
+          </div>
+          <a href='https://blog.naver.com/metauniv' target='_blank' rel='noopener'
+             class='maker-badge' title='돈돈정보통 블로그로 이동'>
+            <span class='maker-dot'></span>
+            <span class='maker-label'>Made by</span>
+            <span class='maker-name'>돈돈정보통</span>
+          </a>
         </div>
         <p style='color:{TEXT_MUTED};margin:0 0 18px 52px;font-size:12.5px;
               letter-spacing:0.01em;'>
